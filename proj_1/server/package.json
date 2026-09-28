@@ -1,0 +1,17 @@
+{
+  "name": "server",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "prestart": "yarn build",
+    "start": "nodemon dist/index.js",
+    "dev": "concurrently --kill-others \"yarn watch\" \"yarn start\""
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14",
+    "typescript": "^7.0.2"
+  }
+}
