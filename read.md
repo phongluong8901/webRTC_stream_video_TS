@@ -34,6 +34,8 @@ npx tailwindcss init -p
 
 yarn add react-router-dom --ignore-engines
 
+npm install peerjs uuid
+
 # --- run
 -- cd proj_1/server
 tsc
