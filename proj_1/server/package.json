@@ -8,10 +8,18 @@
     "watch": "tsc -w",
     "prestart": "yarn build",
     "start": "nodemon dist/index.js",
-    "dev": "concurrently --kill-others \"yarn watch\" \"yarn start\""
+    "dev": "tsx watch src/index.ts"
   },
   "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.6.3",
     "nodemon": "^3.1.14",
+    "tsx": "^4.23.15",
     "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "socket.io": "^4.8.4"
   }
 }
