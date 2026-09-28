@@ -1,10 +1,12 @@
 "use client"
 
 import socketIOClient from 'socket.io-client';
-import { createContext, useEffect, useState } from 'react';
+import { createContext, useEffect, useReducer, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Peer from 'peerjs';
 import { v4 as uuidv4 } from 'uuid';
+import { peersReducer } from './peerReducer';
+import { addPeerAction, removePeerAction } from './peerActions';
 
 const WS = 'http://localhost:8080';
 
@@ -25,6 +27,8 @@ export const RoomProvider: React.FC<RoomProviderProps> = ({ children }) => {
 
     const [stream, setStream] = useState<MediaStream>();
 
+    const [peers, dispatch] = useReducer(peersReducer, {});
+
     // Khai báo hàm xử lý khi nhận được mã phòng
     const enterRoom = ({ roomId }: { roomId: string }) => {
         console.log({ roomId });
@@ -35,6 +39,10 @@ export const RoomProvider: React.FC<RoomProviderProps> = ({ children }) => {
     const getUsers = ({ participants }: { participants: string[] }) => {
         console.log(participants);
     };
+
+    const removePeer = (peerId: string) => {
+        dispatch(removePeerAction(peerId));
+    }
 
     // Hook chạy một lần khi component hiển thị lần đầu
     useEffect(() => {
@@ -56,6 +64,7 @@ export const RoomProvider: React.FC<RoomProviderProps> = ({ children }) => {
 
         ws.on("room-created", enterRoom) // Lắng nghe sự kiện "room-created" từ server gửi về
         ws.on("get-users", getUsers);
+        ws.on("user-disconnected", removePeer)
     }, [])
 
     useEffect(() => {
@@ -64,15 +73,25 @@ export const RoomProvider: React.FC<RoomProviderProps> = ({ children }) => {
 
         ws.on("user-joined", ({ peerId }) => {
             const call = me.call(peerId, stream);
+
+            call.on("stream", (peerStream) => {
+                dispatch(addPeerAction(peerId, peerStream))
+            });
         });
 
         me.on('call', (call) => {
             call.answer(stream);
+
+            call.on("stream", (peerStream) => {
+                dispatch(addPeerAction(call.peer, peerStream))
+            });
         });
-    }, [me, stream])
+    }, [me, stream]);
+
+    console.log({ peers });
 
     return (
-        <RoomContext.Provider value={{ ws, me, stream }}>
+        <RoomContext.Provider value={{ ws, me, stream, peers }}>
             {children}
         </RoomContext.Provider>
     );
