@@ -75,6 +75,12 @@ proj_1/
 └── peerjs/   # PeerJS signaling server
 ```
 
+<img width="1025" height="779" alt="image" src="https://github.com/user-attachments/assets/69d659f8-e537-4518-817a-5365e622cbf3" />
+
+<img width="1022" height="721" alt="image" src="https://github.com/user-attachments/assets/2134e6bc-5e9c-4385-acca-7af96d458069" />
+
+<img width="1002" height="897" alt="image" src="https://github.com/user-attachments/assets/2afb57fd-eb6a-4c79-b158-4008d0ba86f7" />
+
 
 <img width="1902" height="913" alt="image" src="https://github.com/user-attachments/assets/293a335e-4ed7-4ed2-b9a3-62a0f8ac1f1a" />
 
