@@ -67,7 +67,10 @@ export const RoomProvider: React.FC<RoomProviderProps> = ({ children }) => {
 
     const [me, setMe] = useState<Peer>(); // Lưu đối tượng PeerJS của chính mình
     const [stream, setStream] = useState<MediaStream>(); // Lưu luồng Media (Camera & Micro hoặc Màn hình) của chính mình
+    const [screenStream, setScreenStream] = useState<MediaStream>();
+    const [screenStreams, setScreenStreams] = useState<Record<string, MediaStream>>({});
     const [peerReady, setPeerReady] = useState(false);
+    const [isMicMuted, setIsMicMuted] = useState(false);
     const [peers, dispatch] = useReducer(peersReducer, {}); // Quản lý danh sách các peer (người dùng khác) trong phòng
     const [screenSharingId, setScreenSharingId] = useState<string>(""); // Lưu ID của người đang chia sẻ màn hình
     const [roomId, setRoomId] = useState<string>(); // Lưu mã phòng hiện tại
@@ -77,7 +80,17 @@ export const RoomProvider: React.FC<RoomProviderProps> = ({ children }) => {
     })
     const meRef = useRef<Peer | undefined>(undefined);
     const streamRef = useRef<MediaStream | undefined>(undefined);
+    const localScreenRef = useRef<MediaStream | undefined>(undefined);
+    const roomIdRef = useRef<string | undefined>(undefined);
+    const participantIds = useRef(new Set<string>());
     const connectingPeers = useRef(new Set<string>());
+    const screenCallsRef = useRef<Record<string, ReturnType<Peer["call"]>>>({});
+    const incomingScreenCallsRef = useRef<Record<string, ReturnType<Peer["call"]>>>({});
+
+    const updateRoomId = useCallback((nextRoomId?: string) => {
+        roomIdRef.current = nextRoomId;
+        setRoomId(nextRoomId);
+    }, []);
 
     // 1. Hàm xử lý khi server báo tạo phòng thành công -> chuyển hướng client sang trang phòng
     const enterRoom = useCallback(({ roomId }: { roomId: string }) => {
@@ -104,61 +117,95 @@ export const RoomProvider: React.FC<RoomProviderProps> = ({ children }) => {
         call.on("close", () => connectingPeers.current.delete(peerId));
     }, [dispatch]);
 
+    const connectScreenToPeer = useCallback((peerId: string) => {
+        const localPeer = meRef.current;
+        const localScreen = localScreenRef.current;
+        if (!localPeer || !localScreen || localPeer.id === peerId || screenCallsRef.current[peerId]) return;
+
+        const call = localPeer.call(peerId, localScreen, { metadata: { kind: "screen" } });
+        screenCallsRef.current[peerId] = call;
+        call.on("error", (error) => {
+            delete screenCallsRef.current[peerId];
+            console.error("Screen share call failed:", error);
+        });
+        call.on("close", () => {
+            delete screenCallsRef.current[peerId];
+        });
+    }, []);
+
     // 2. Hàm nhận danh sách người dùng hiện có trong phòng từ server
-    const getUsers = useCallback(({ participants }: { participants: string[] }) => {
+    const getUsers = useCallback(({ participants, sharingPeerId }: { participants: string[]; sharingPeerId?: string }) => {
         console.log("Participants in room:", participants);
-        participants.forEach(connectToPeer);
-    }, [connectToPeer]);
+        participantIds.current = new Set(participants.filter((peerId) => peerId !== meRef.current?.id));
+        participants.forEach((peerId) => {
+            connectToPeer(peerId);
+            connectScreenToPeer(peerId);
+        });
+        if (sharingPeerId) setScreenSharingId(sharingPeerId);
+    }, [connectScreenToPeer, connectToPeer]);
 
     // 3. Hàm xóa peer khỏi danh sách Reducer khi họ rời phòng
-    const removePeer = (peerId: string) => {
+    const removePeer = useCallback((peerId: string) => {
+        participantIds.current.delete(peerId);
         connectingPeers.current.delete(peerId);
+        screenCallsRef.current[peerId]?.close();
+        delete screenCallsRef.current[peerId];
+        incomingScreenCallsRef.current[peerId]?.close();
+        delete incomingScreenCallsRef.current[peerId];
+        setScreenStreams((current) => {
+            const { [peerId]: removed, ...remaining } = current;
+            return remaining;
+        });
         dispatch(removePeerAction(peerId));
-    }
+    }, [dispatch]);
 
-    // 4. Hàm chuyển đổi luồng stream (dùng cho cả khi bật camera lẫn bật chia sẻ màn hình)
-    const switchStream = (newStream: MediaStream) => {
-        streamRef.current = newStream;
-        setStream(newStream);
+    const stopScreenSharing = useCallback(() => {
+        const localPeer = meRef.current;
+        const activeRoomId = roomIdRef.current;
+        localScreenRef.current?.getTracks().forEach((track) => track.stop());
+        localScreenRef.current = undefined;
+        setScreenStream(undefined);
+        Object.values(screenCallsRef.current).forEach((call) => call.close());
+        screenCallsRef.current = {};
 
-        if (me) {
-            setScreenSharingId(me.id || "");
+        if (localPeer && activeRoomId) {
+            ws.emit("stop-sharing", { peerId: localPeer.id, roomId: activeRoomId });
+        }
+        setScreenSharingId((current) => current === localPeer?.id ? "" : current);
+    }, []);
 
-            // Thay đổi track video gửi đi cho tất cả các kết nối peer hiện tại thông qua WebRTC Sender
-            Object.values(me.connections).forEach((connections: any) => {
-                const videoTrack = newStream.getTracks()
-                    .find(track => track.kind === 'video');
+    const shareScreen = useCallback(async () => {
+        if (localScreenRef.current) {
+            stopScreenSharing();
+            return;
+        }
 
-                if (videoTrack && connections[0]?.peerConnection) {
-                    connections[0].peerConnection
-                        .getSenders()[1] // Sender thứ 2 ứng với video track
-                        .replaceTrack(videoTrack)
-                        .catch((err: any) => console.log(err));
-                }
+        try {
+            const nextScreen = await navigator.mediaDevices.getDisplayMedia({ video: true });
+            localScreenRef.current = nextScreen;
+            setScreenStream(nextScreen);
+            const localPeer = meRef.current;
+            const activeRoomId = roomIdRef.current;
+            if (localPeer) setScreenSharingId(localPeer.id);
+            if (localPeer && activeRoomId) {
+                ws.emit("start-sharing", { peerId: localPeer.id, roomId: activeRoomId });
+            }
+            participantIds.current.forEach(connectScreenToPeer);
+            nextScreen.getVideoTracks()[0]?.addEventListener("ended", stopScreenSharing, { once: true });
+        } catch (error) {
+            console.error("Could not start screen sharing:", error);
+        }
+    }, [connectScreenToPeer, stopScreenSharing]);
+
+    const toggleMicrophone = useCallback(() => {
+        setIsMicMuted((muted) => {
+            const nextMuted = !muted;
+            streamRef.current?.getAudioTracks().forEach((track) => {
+                track.enabled = !nextMuted;
             });
-        }
-    }
-
-    // 5. Hàm điều khiển bật/tắt chia sẻ màn hình
-    const shareScreen = () => {
-        if (!screenSharingId) {
-            // Nếu chưa chia sẻ -> xin quyền lấy stream màn hình (getDisplayMedia)
-            navigator.mediaDevices
-                .getDisplayMedia({ video: true })
-                .then(switchStream)
-                .catch((err) => console.log("Error sharing screen:", err));
-        } else {
-            // Nếu đang chia sẻ -> quay trở lại camera cũ của máy (hoặc tạo lại luồng giả nếu không có camera)
-            navigator.mediaDevices
-                .getUserMedia({ video: true, audio: true })
-                .then(switchStream)
-                .catch(() => {
-                    const fakeStream = createFakeStream();
-                    switchStream(fakeStream);
-                });
-            setScreenSharingId("");
-        }
-    }
+            return nextMuted;
+        });
+    }, []);
 
     const sendMessage = (message: string) => {
         const messageData: IMessage = {
@@ -171,14 +218,14 @@ export const RoomProvider: React.FC<RoomProviderProps> = ({ children }) => {
         ws.emit("send-message", roomId, messageData);
     }
 
-    const addMessage = (message: IMessage) => {
+    const addMessage = useCallback((message: IMessage) => {
         console.log('new messages', message);
         chatDispatch(addMessageAction(message));
-    }
+    }, []);
 
-    const addHistory = (message: IMessage[]) => {
+    const addHistory = useCallback((message: IMessage[]) => {
         chatDispatch(addHistoryAction(message));
-    }
+    }, []);
 
     const toggleChat = () => {
         chatDispatch(toggleChatAction(!chat.isChatOpen));
@@ -200,6 +247,26 @@ export const RoomProvider: React.FC<RoomProviderProps> = ({ children }) => {
 
         peer.on('call', (call) => {
             if (!active || meRef.current !== peer) return;
+            const callKind = (call.metadata as { kind?: string } | undefined)?.kind;
+            if (callKind === "screen") {
+                incomingScreenCallsRef.current[call.peer] = call;
+                call.answer();
+                call.on("stream", (remoteScreen) => {
+                    setScreenStreams((current) => ({ ...current, [call.peer]: remoteScreen }));
+                });
+                call.on("close", () => {
+                    delete incomingScreenCallsRef.current[call.peer];
+                    setScreenStreams((current) => {
+                        const { [call.peer]: removed, ...remaining } = current;
+                        return remaining;
+                    });
+                });
+                call.on("error", (error) => {
+                    console.error("Incoming screen share failed:", error);
+                });
+                return;
+            }
+
             const localStream = streamRef.current;
             console.info("PeerJS incoming call", { from: call.peer, hasLocalStream: Boolean(localStream) });
             if (!localStream) return;
@@ -245,10 +312,22 @@ export const RoomProvider: React.FC<RoomProviderProps> = ({ children }) => {
         ws.on("get-users", getUsers);
         ws.on("user-disconnected", removePeer);
         ws.on("user-started-sharing", (peerId) => setScreenSharingId(peerId));
-        ws.on("user-stopped-sharing", () => setScreenSharingId(""));
+        ws.on("user-stopped-sharing", (peerId: string) => {
+            incomingScreenCallsRef.current[peerId]?.close();
+            delete incomingScreenCallsRef.current[peerId];
+            setScreenSharingId((current) => current === peerId ? "" : current);
+            setScreenStreams((current) => {
+                const { [peerId]: removed, ...remaining } = current;
+                return remaining;
+            });
+        });
         ws.on("add-message", addMessage)
         ws.on("get-message", addHistory)
-        ws.on("user-joined", ({ peerId }: { peerId: string }) => connectToPeer(peerId));
+        ws.on("user-joined", ({ peerId }: { peerId: string }) => {
+            participantIds.current.add(peerId);
+            connectToPeer(peerId);
+            connectScreenToPeer(peerId);
+        });
 
         // Cleanup function: Gỡ bỏ các listener khi component unmount
         return () => {
@@ -258,6 +337,8 @@ export const RoomProvider: React.FC<RoomProviderProps> = ({ children }) => {
                 setPeerReady(false);
             }
             peer.destroy();
+            localScreenRef.current?.getTracks().forEach((track) => track.stop());
+            streamRef.current?.getTracks().forEach((track) => track.stop());
             ws.off("room-created");
             ws.off("get-users");
             ws.off("user-disconnected");
@@ -267,23 +348,15 @@ export const RoomProvider: React.FC<RoomProviderProps> = ({ children }) => {
             ws.off("add-message");
             ws.off("get-message");
         }
-    }, []);
-
-    // 7. Hook tự động phát tín hiệu Socket khi trạng thái `screenSharingId` thay đổi
-    useEffect(() => {
-        if (screenSharingId) {
-            ws.emit("start-sharing", { peerId: screenSharingId, roomId });
-        } else {
-            ws.emit("stop-sharing", { peerId: me?.id, roomId });
-        }
-    }, [screenSharingId, roomId, me]);
+    }, [addHistory, addMessage, connectScreenToPeer, connectToPeer, enterRoom, getUsers, removePeer]);
 
     console.log({ peers });
 
     return (
         <RoomContext.Provider value={{
-            ws, me, stream, peerReady, peers, shareScreen, screenSharingId, setRoomId,
-            sendMessage, chat, toggleChat
+            ws, me, stream, screenStream, screenStreams, peerReady, peers, shareScreen,
+            stopScreenSharing, screenSharingId, setRoomId: updateRoomId, isMicMuted,
+            toggleMicrophone, sendMessage, chat, toggleChat
         }}>
             {children}
         </RoomContext.Provider>

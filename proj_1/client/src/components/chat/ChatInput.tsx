@@ -6,23 +6,32 @@ export const ChatInput: React.FC = () => {
     const [message, setMessage] = useState("");
     const { sendMessage } = useContext(RoomContext);
 
+    const submitMessage = (event: React.FormEvent<HTMLFormElement>) => {
+        event.preventDefault();
+        const trimmedMessage = message.trim();
+        if (!trimmedMessage) return;
+        sendMessage(trimmedMessage);
+        setMessage("");
+    };
+
     return (
         <div>
-            <form onSubmit={(e) => {
-                e.preventDefault();
-                sendMessage(message);
-                setMessage("");
-            }}>
-                <div className="flex">
+            <form onSubmit={submitMessage}>
+                <div className="flex items-end gap-2">
                     <textarea
-                        className="border rounded"
+                        aria-label="Nhập tin nhắn"
+                        placeholder="Nhập tin nhắn..."
+                        rows={2}
+                        className="min-h-11 min-w-0 flex-1 resize-none rounded-lg border border-white/10 bg-[#101719] px-3 py-2 text-sm text-white outline-none placeholder:text-white/35 focus:border-[#b8f36b]/70"
                         onChange={(e) => setMessage(e.target.value)}
                         value={message}
                     />
                     <Button
                         testId="send-msg-button"
                         type="submit"
-                        className="bg-rose-400 p-4 mx-2 rounded-lg text-xl hover:bg-rose-600 text-white"
+                        aria-label="Gửi tin nhắn"
+                        disabled={!message.trim()}
+                        className="grid h-11 w-11 flex-none place-items-center rounded-lg bg-[#b8f36b] text-[#172124] transition hover:bg-[#c9ff86] disabled:cursor-not-allowed disabled:opacity-40"
                     >
                         <svg
                             style={{ transform: "rotate(90deg)" }}

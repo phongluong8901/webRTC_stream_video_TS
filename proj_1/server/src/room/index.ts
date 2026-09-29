@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from "uuid";
 // Lưu trữ danh sách các phòng: key là roomId (string), value là mảng chứa các peerId (string[])
 const rooms: Record<string, string[]> = {};
 const chats: Record<string, IMessage[]> = {};
+const sharingPeers: Record<string, string> = {};
 
 // Định nghĩa kiểu dữ liệu cho tham số đầu vào khi tham gia/rời phòng
 interface IRoomParams {
@@ -50,6 +51,7 @@ export const roomHandler = (socket: Socket) => {
     socket.emit("get-users", {
       roomId,
       participants: rooms[roomId],
+      sharingPeerId: sharingPeers[roomId],
     });
     socket.emit("get-message", chats[roomId] || []);
 
@@ -66,6 +68,10 @@ export const roomHandler = (socket: Socket) => {
     if (rooms[roomId]) {
       // Lọc bỏ peerId của người dùng vừa rời khỏi danh sách phòng
       rooms[roomId] = rooms[roomId].filter((id) => id !== peerId);
+      if (sharingPeers[roomId] === peerId) {
+        delete sharingPeers[roomId];
+        socket.to(roomId).emit("user-stopped-sharing", peerId);
+      }
       // Thông báo cho những người còn lại trong phòng biết user này đã ngắt kết nối
       socket.to(roomId).emit("user-disconnected", peerId);
     }
@@ -73,11 +79,13 @@ export const roomHandler = (socket: Socket) => {
 
   // 4. Hàm xử lý khi người dùng bắt đầu chia sẻ màn hình
   const startSharing = ({ peerId, roomId }: IRoomParams) => {
+    sharingPeers[roomId] = peerId;
     socket.to(roomId).emit("user-started-sharing", peerId);
   };
 
   // 5. Hàm xử lý khi người dùng dừng chia sẻ màn hình
   const stopSharing = ({ peerId, roomId }: IRoomParams) => {
+    if (sharingPeers[roomId] === peerId) delete sharingPeers[roomId];
     socket.to(roomId).emit("user-stopped-sharing", peerId);
   };
 
