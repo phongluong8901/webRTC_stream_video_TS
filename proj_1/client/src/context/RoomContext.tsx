@@ -7,6 +7,7 @@ import Peer from 'peerjs';
 import { v4 as uuidv4 } from 'uuid';
 import { peersReducer } from './peerReducer';
 import { addPeerAction, removePeerAction } from './peerActions';
+import { IMessage } from '../types/chat';
 
 const WS = 'http://localhost:8080';
 
@@ -85,22 +86,38 @@ export const RoomProvider: React.FC<RoomProviderProps> = ({ children }) => {
         }
     }
 
+    const sendMessage = (message: string) => {
+        const messageData: IMessage = {
+            content: message,
+            timestamps: new Date().getTime(),
+            author: me?.id,
+        };
+
+        ws.emit("send-message", roomId, messageData);
+
+
+    }
+
     // 6. Hook chạy một lần duy nhất khi khởi tạo ứng dụng (Mount) để cài đặt PeerJS và Socket Listeners
     useEffect(() => {
         const meId = uuidv4(); // Tạo định danh ngẫu nhiên cho PeerJS cá nhân
-        const peer = new Peer(meId);
+        const peer = new Peer(meId, {
+            host: 'localhost',
+            port: 9000,
+            path: '/myapp'
+        });
         setMe(peer);
 
-        // Xin quyền truy cập Camera và Micro mặc định khi vào app
-        try {
-            navigator.mediaDevices
-                .getUserMedia({ video: true, audio: true })
-                .then((stream) => {
-                    setStream(stream);
-                })
-        } catch (error) {
-            console.log(error);
-        }
+        // Xin quyền truy cập Camera và Micro mặc định khi vào app (Đã thêm catch để chống crash nếu máy không có thiết bị)
+        navigator.mediaDevices
+            .getUserMedia({ video: true, audio: true })
+            .then((stream) => {
+                setStream(stream);
+            })
+            .catch((error) => {
+                console.warn("Không tìm thấy thiết bị camera/micro hoặc chưa được cấp quyền:", error);
+                // Vẫn cho phép ứng dụng tiếp tục chạy bình thường (stream sẽ là undefined và hiển thị trạng thái tắt camera)
+            });
 
         // Lắng nghe các sự kiện điều hướng và quản lý phòng từ Socket.IO Server
         ws.on("room-created", enterRoom);
@@ -125,7 +142,7 @@ export const RoomProvider: React.FC<RoomProviderProps> = ({ children }) => {
         if (screenSharingId) {
             ws.emit("start-sharing", { peerId: screenSharingId, roomId });
         } else {
-            ws.emit("stop-sharing", { peerId: me?.id, roomId }); // Đã bổ sung truyền đủ tham số cho stop-sharing
+            ws.emit("stop-sharing", { peerId: me?.id, roomId });
         }
     }, [screenSharingId, roomId, me]);
 
@@ -156,8 +173,10 @@ export const RoomProvider: React.FC<RoomProviderProps> = ({ children }) => {
     console.log({ peers });
 
     return (
-        // Cung cấp các state và hàm xử lý xuống toàn bộ ứng dụng thông qua Context Provider
-        <RoomContext.Provider value={{ ws, me, stream, peers, shareScreen, screenSharingId, setRoomId }}>
+        <RoomContext.Provider value={{
+            ws, me, stream, peers, shareScreen, screenSharingId, setRoomId,
+            sendMessage
+        }}>
             {children}
         </RoomContext.Provider>
     );

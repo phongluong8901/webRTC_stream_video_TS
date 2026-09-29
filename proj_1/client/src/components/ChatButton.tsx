@@ -1,4 +1,4 @@
-export const ShareScreenButton: React.FC<{ onClick: () => void }> = ({ onClick }) => {
+export const ChatButton: React.FC<{ onClick: () => void }> = ({ onClick }) => {
     return (
         <button onClick={onClick}
             className="flex items-center gap-2 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors shadow-md"

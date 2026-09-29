@@ -4,6 +4,8 @@ import { RoomContext } from "../context/RoomContext";
 import { VideoPlayer } from "../components/VideoPlayer";
 import { PeerState } from "../context/peerReducer";
 import { ShareScreenButton } from "../components/ShareScreenButton";
+import { ChatButton } from "../components/ChatButton";
+import { Chat } from "../components/chat/Chat";
 
 export const Room = () => {
     // 1. Lấy ID phòng từ URL (ví dụ: đường dẫn /room/123 -> id = "123")
@@ -32,9 +34,11 @@ export const Room = () => {
     const { [screenSharingId]: sharing, ...peersToShow } = peers;
 
     return (
-        <>
-            {/* Hiển thị mã phòng hiện tại lên giao diện */}
-            Room id {id}
+        <div className="flex flex-col min-h-screen">
+            <div className="bg-red-500 p-4 text-white">
+                {/* Hiển thị mã phòng hiện tại lên giao diện */}
+                Room id {id}
+            </div>
 
             <div className="flex">
                 {/* 7. Nếu có người đang chia sẻ màn hình, hiển thị khung to (chiếm 80% chiều rộng - w-4/5) ở bên trái */}
@@ -56,12 +60,17 @@ export const Room = () => {
                         <VideoPlayer key={index} stream={peer.stream} />
                     ))}
                 </div>
+                {/* chat  area */}
+                <div className="border-l-2 pb-28">
+                    <Chat />
+                </div>
             </div>
 
             {/* 10. Thanh công cụ cố định ở đáy màn hình chứa nút bấm Chia sẻ màn hình */}
-            <div className="fixed bottom-0 p-6 w-full flex justify-center border-t-2">
+            <div className="h-28 fixed bottom-0 p-6 w-full flex items-center justify-center border-t-2 bg-white">
                 <ShareScreenButton onClick={shareScreen} />
+                <ChatButton onClick={shareScreen} />
             </div>
-        </>
+        </div>
     )
 }
