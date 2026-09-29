@@ -18,3 +18,9 @@ git push origin p3_stream_video
 
 ---
 git add . ; git commit -m "change: first" ; git push origin main
+
+---
+git checkout -b p4_advanced_user
+git add .
+git commit -m "change: first"
+git push origin p4_advanced_user
