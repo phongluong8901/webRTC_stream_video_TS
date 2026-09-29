@@ -25,7 +25,7 @@ yarn add -d types/cors
 
 yarn add uuid @types/uuid
 
--- cd proj_1/client
+-- proj_1/client
 yarn add socket.io-client
 yarn add socket.io-client --ignore-engines
 

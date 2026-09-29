@@ -57,9 +57,21 @@ export const roomHandler = (socket: Socket) => {
         }
     }
 
-    // 4. Đăng ký các sự kiện lắng nghe từ phía Client gửi lên
+    // 4. Hàm xử lý khi người dùng bắt đầu chia sẻ màn hình
+    const startSharing = ({ peerId, roomId }: IRoomParams) => {
+        socket.to(roomId).emit("user-started-sharing", peerId);
+    }
+
+    // 5. Hàm xử lý khi người dùng dừng chia sẻ màn hình
+    const stopSharing = ({ peerId, roomId }: IRoomParams) => {
+        socket.to(roomId).emit("user-stopped-sharing", peerId);
+    }
+
+    // 6. Đăng ký các sự kiện lắng nghe từ phía Client gửi lên
     socket.on("create-room", createRoom);   // Lắng nghe sự kiện tạo phòng từ client
     socket.on("join-room", joinRoom);       // Lắng nghe sự kiện tham gia phòng từ client
+    socket.on("start-sharing", startSharing);
+    socket.on("stop-sharing", stopSharing);
 };
 
 // socket.emit(): Phát sóng hoặc gửi một thông điệp riêng đến chính Client đang kết nối.

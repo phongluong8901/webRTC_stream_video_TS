@@ -24,34 +24,74 @@ export const RoomProvider: React.FC<RoomProviderProps> = ({ children }) => {
     const navigate = useNavigate(); // Lấy hàm điều hướng từ React Router
 
     const [me, setMe] = useState<Peer>(); // Lưu đối tượng PeerJS của chính mình
-    const [stream, setStream] = useState<MediaStream>(); // Lưu luồng Media (Camera & Micro) của chính mình
-    const [peers, dispatch] = useReducer(peersReducer, {}); // Quản lý danh sách các peer (người dùng khác) trong phòng bằng Reducer
+    const [stream, setStream] = useState<MediaStream>(); // Lưu luồng Media (Camera & Micro hoặc Màn hình) của chính mình
+    const [peers, dispatch] = useReducer(peersReducer, {}); // Quản lý danh sách các peer (người dùng khác) trong phòng
+    const [screenSharingId, setScreenSharingId] = useState<string>(""); // Lưu ID của người đang chia sẻ màn hình
+    const [roomId, setRoomId] = useState<string>(); // Lưu mã phòng hiện tại
 
-    // Hàm xử lý khi server báo tạo phòng thành công -> chuyển hướng client sang trang phòng
+    // 1. Hàm xử lý khi server báo tạo phòng thành công -> chuyển hướng client sang trang phòng
     const enterRoom = ({ roomId }: { roomId: string }) => {
         console.log({ roomId });
         navigate(`/room/${roomId}`);
     };
 
-    // Hàm nhận danh sách người dùng hiện có trong phòng từ server
+    // 2. Hàm nhận danh sách người dùng hiện có trong phòng từ server
     const getUsers = ({ participants }: { participants: string[] }) => {
         console.log(participants);
     };
 
-    // Hàm xóa peer khỏi danh sách khi họ rời phòng
+    // 3. Hàm xóa peer khỏi danh sách Reducer khi họ rời phòng
     const removePeer = (peerId: string) => {
         dispatch(removePeerAction(peerId));
     }
 
-    // 1. Hook chạy một lần duy nhất khi khởi tạo ứng dụng (Mount)
+    // 4. Hàm chuyển đổi luồng stream (dùng cho cả khi bật camera lẫn bật chia sẻ màn hình)
+    const switchStream = (newStream: MediaStream) => {
+        setStream(newStream);
+
+        if (me) {
+            setScreenSharingId(me.id || "");
+
+            // Thay đổi track video gửi đi cho tất cả các kết nối peer hiện tại thông qua WebRTC Sender
+            Object.values(me.connections).forEach((connections: any) => {
+                const videoTrack = newStream.getTracks()
+                    .find(track => track.kind === 'video');
+
+                if (videoTrack && connections[0]?.peerConnection) {
+                    connections[0].peerConnection
+                        .getSenders()[1] // Sender thứ 2 ứng với video track
+                        .replaceTrack(videoTrack)
+                        .catch((err: any) => console.log(err));
+                }
+            });
+        }
+    }
+
+    // 5. Hàm điều khiển bật/tắt chia sẻ màn hình
+    const shareScreen = () => {
+        if (!screenSharingId) {
+            // Nếu chưa chia sẻ -> xin quyền lấy stream màn hình (getDisplayMedia)
+            navigator.mediaDevices
+                .getDisplayMedia({ video: true })
+                .then(switchStream)
+                .catch((err) => console.log("Error sharing screen:", err));
+        } else {
+            // Nếu đang chia sẻ -> quay trở lại camera cũ của máy (getUserMedia)
+            navigator.mediaDevices
+                .getUserMedia({ video: true, audio: true })
+                .then(switchStream)
+                .catch((err) => console.log("Error getting user media:", err));
+            setScreenSharingId("");
+        }
+    }
+
+    // 6. Hook chạy một lần duy nhất khi khởi tạo ứng dụng (Mount) để cài đặt PeerJS và Socket Listeners
     useEffect(() => {
         const meId = uuidv4(); // Tạo định danh ngẫu nhiên cho PeerJS cá nhân
-
-        // Khởi tạo PeerJS client với ID vừa tạo
         const peer = new Peer(meId);
         setMe(peer);
 
-        // Xin quyền truy cập Camera và Micro từ trình duyệt của người dùng
+        // Xin quyền truy cập Camera và Micro mặc định khi vào app
         try {
             navigator.mediaDevices
                 .getUserMedia({ video: true, audio: true })
@@ -62,34 +102,51 @@ export const RoomProvider: React.FC<RoomProviderProps> = ({ children }) => {
             console.log(error);
         }
 
-        // Lắng nghe các sự kiện từ Socket.IO Server
-        ws.on("room-created", enterRoom);        // Khi tạo phòng thành công -> chuyển trang
-        ws.on("get-users", getUsers);            // Nhận danh sách thành viên
-        ws.on("user-disconnected", removePeer);  // Khi có người ngắt kết nối -> xóa khỏi UI
-    }, [])
+        // Lắng nghe các sự kiện điều hướng và quản lý phòng từ Socket.IO Server
+        ws.on("room-created", enterRoom);
+        ws.on("get-users", getUsers);
+        ws.on("user-disconnected", removePeer);
+        ws.on("user-started-sharing", (peerId) => setScreenSharingId(peerId));
+        ws.on("user-stopped-sharing", () => setScreenSharingId(""));
 
-    // 2. Hook xử lý việc gọi điện P2P qua PeerJS (Chạy khi đã có thông tin `me` và `stream` của mình)
+        // Cleanup function: Gỡ bỏ các listener khi component unmount để tránh bị gọi trùng lặp
+        return () => {
+            ws.off("room-created");
+            ws.off("get-users");
+            ws.off("user-disconnected");
+            ws.off("user-started-sharing");
+            ws.off("user-stopped-sharing");
+            ws.off("user-joined");
+        }
+    }, []);
+
+    // 7. Hook tự động phát tín hiệu Socket khi trạng thái `screenSharingId` thay đổi
+    useEffect(() => {
+        if (screenSharingId) {
+            ws.emit("start-sharing", { peerId: screenSharingId, roomId });
+        } else {
+            ws.emit("stop-sharing", { peerId: me?.id, roomId }); // Đã bổ sung truyền đủ tham số cho stop-sharing
+        }
+    }, [screenSharingId, roomId, me]);
+
+    // 8. Hook xử lý việc gọi điện P2P qua PeerJS (Chạy khi `me` và `stream` đã sẵn sàng)
     useEffect(() => {
         if (!me) return;
         if (!stream) return;
 
         // Tình huống A: Khi có người dùng mới tham gia vào phòng (Server phát sự kiện "user-joined")
         ws.on("user-joined", ({ peerId }) => {
-            // Gọi điện đến peer mới vừa vào, đồng thời gửi kèm stream của mình
             const call = me.call(peerId, stream);
 
-            // Lắng nghe sự kiện khi peer kia trả lời và gửi ngược lại stream của họ cho mình
             call.on("stream", (peerStream) => {
                 dispatch(addPeerAction(peerId, peerStream));
             });
         });
 
-        // Tình huống B: Khi có người khác gọi đến mình (Mình nhận được cuộc gọi từ PeerJS)
+        // Tình huống B: Khi có người khác gọi điện đến mình
         me.on('call', (call) => {
-            // Trả lời cuộc gọi và gửi kèm stream của chính mình cho họ
             call.answer(stream);
 
-            // Lắng nghe luồng stream của người gọi gửi tới để hiển thị lên màn hình
             call.on("stream", (peerStream) => {
                 dispatch(addPeerAction(call.peer, peerStream));
             });
@@ -99,8 +156,8 @@ export const RoomProvider: React.FC<RoomProviderProps> = ({ children }) => {
     console.log({ peers });
 
     return (
-        // Cung cấp các biến trạng thái và kết nối xuống toàn bộ các component con bên trong
-        <RoomContext.Provider value={{ ws, me, stream, peers }}>
+        // Cung cấp các state và hàm xử lý xuống toàn bộ ứng dụng thông qua Context Provider
+        <RoomContext.Provider value={{ ws, me, stream, peers, shareScreen, screenSharingId, setRoomId }}>
             {children}
         </RoomContext.Provider>
     );
