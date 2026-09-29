@@ -2,7 +2,7 @@
 
 Ứng dụng họp video trực tuyến nhiều người dùng, xây dựng bằng React, Socket.IO, PeerJS và WebRTC. Người dùng có thể tạo phòng, mời người khác bằng room ID, trao đổi tin nhắn, bật/tắt micro và chia sẻ màn hình trong khi vẫn giữ camera của người chia sẻ ở gallery.
 
-> Đây là dự án học tập/prototype. Server hiện lưu room và lịch sử chat trong bộ nhớ; dữ liệu sẽ mất khi server khởi động lại. Chưa có đăng nhập, phân quyền phòng hoặc lưu trữ bền vững.
+> Đây là dự án học tập/prototype. User, meeting sessions và chat hiện được lưu trong MongoDB. Trước khi đưa lên production cần cấu hình HTTPS, TURN, chính sách bảo mật và quản lý secrets phù hợp.
 
 ## Tính năng
 
@@ -14,6 +14,11 @@
 - Người vào phòng khi đang có người chia sẻ sẽ được báo trạng thái và nhận luồng màn hình.
 - Bật/tắt micro.
 - Chat realtime và nhận lịch sử chat đang có trong phiên server.
+- Đăng ký bằng email/mật khẩu có email verification.
+- Đăng nhập bằng Google OAuth 2.0 / Google Identity Services.
+- Phiên đăng nhập bằng cookie HttpOnly; Socket.IO yêu cầu session hợp lệ.
+- Lưu users, phòng họp, thành viên/thời điểm tham gia, thời lượng và tin nhắn trong MongoDB.
+- Trang chủ hiển thị lịch sử các phòng do tài khoản hiện tại tạo.
 - Bố cục responsive cho desktop và màn hình nhỏ.
 
 ## Công nghệ
@@ -21,7 +26,7 @@
 | Thành phần | Công nghệ | Vai trò |
 | --- | --- | --- |
 | Client | React, TypeScript, React Router, Tailwind CSS | Giao diện, trạng thái phòng và media local |
-| Signaling/chat server | Node.js, Express, Socket.IO | Quản lý room, thành viên, sự kiện chat và trạng thái chia sẻ màn hình |
+| API/auth/signaling server | Node.js, Express, Socket.IO, Mongoose | Xác thực, Mongo persistence, quản lý room, chat và trạng thái chia sẻ màn hình |
 | Peer server | PeerJS | Trao đổi thông tin signaling để thiết lập WebRTC |
 | Media | WebRTC | Truyền camera, micro và màn hình trực tiếp giữa các trình duyệt |
 
@@ -83,7 +88,7 @@ proj_1/
 
 ## Cài đặt và chạy local
 
-Cài dependencies riêng trong cả ba package:
+Cài dependencies riêng trong các package:
 
 ```bash
 cd proj_1/client
@@ -95,6 +100,22 @@ npm install
 cd ../peerjs
 npm install
 ```
+
+Tạo các file cấu hình local từ template:
+
+```bash
+cp proj_1/server/.env.example proj_1/server/.env
+cp proj_1/client/.env.example proj_1/client/.env
+```
+
+Trên Windows PowerShell có thể thay `cp` bằng `Copy-Item`. Điền các giá trị thật vào file `.env` local, không commit chúng:
+
+- `proj_1/server/.env`: MongoDB URI, JWT secret, Google Client ID và thông tin SMTP.
+- `proj_1/client/.env`: `REACT_APP_GOOGLE_CLIENT_ID` và `REACT_APP_API_URL`.
+- Tạo Google OAuth 2.0 Web client trong Google Cloud Console; thêm `http://localhost:3000` vào Authorized JavaScript origins. Dùng cùng client ID ở client và server.
+- Với Gmail SMTP, bật 2-Step Verification và tạo App Password mới riêng cho ứng dụng. Không dùng mật khẩu Gmail thường.
+- Trong MongoDB Atlas, tạo database user riêng với quyền tối thiểu, giới hạn Network Access và đặt URI vào `MONGODB_URI`.
+- Tạo `JWT_SECRET` ngẫu nhiên dài ít nhất 32 ký tự. Không đặt secret trong source code, README, GitHub hoặc chat.
 
 Mở ba terminal riêng và chạy từng service:
 
@@ -144,11 +165,11 @@ npm test
 
 ## Giới hạn và hướng phát triển
 
-- Danh sách room, trạng thái share và chat chỉ nằm trong RAM của một process server; server restart sẽ xóa dữ liệu.
-- Chưa có tài khoản, quyền truy cập, tên hiển thị do người dùng chọn, hoặc moderation.
+- History hiện tập trung vào các phòng do tài khoản tạo; sản phẩm đầy đủ cần thêm chính sách lưu phòng user tham gia, thời hạn lưu và xóa dữ liệu.
+- Chưa có quên mật khẩu/resend verification, MFA, refresh-token rotation hoặc moderation.
 - Media hiện dùng mesh P2P: mỗi trình duyệt kết nối trực tiếp với các peer khác. Khi số người tăng, băng thông và tải thiết bị tăng theo số kết nối; đây chưa phải kiến trúc SFU phù hợp cho phòng quy mô lớn.
 - Chưa cấu hình STUN/TURN riêng cho production. Một số mạng doanh nghiệp, NAT hoặc firewall có thể chặn kết nối WebRTC.
-- Các dịch vụ hiện được cấu hình cho local development; trước khi public cần HTTPS, biến môi trường, CORS/authorization phù hợp, giới hạn và xác thực room ID, cùng cơ chế lưu trữ phù hợp.
+- Các dịch vụ hiện được cấu hình cho local development; trước khi public cần HTTPS, CORS chỉ cho domain tin cậy, cookie/CSRF phù hợp, rate limits và secrets manager.
 - Có thể phát triển tiếp: SFU (ví dụ mediasoup/LiveKit), TURN, lưu chat bền vững, tên/avatar tùy chỉnh, danh sách người tham gia, ghi nhận lỗi kết nối và test end-to-end.
 
 ## Đóng góp

@@ -1,6 +1,5 @@
 "use client"
 
-import socketIOClient from 'socket.io-client';
 import { createContext, useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Peer from 'peerjs';
@@ -10,18 +9,49 @@ import { addPeerAction, removePeerAction } from '../reducers/peerActions';
 import { IMessage } from '../types/chat';
 import { chatReducer } from '../reducers/chatReducer';
 import { addHistoryAction, addMessageAction, toggleChatAction } from '../reducers/chatActions';
-
-const WS = 'http://localhost:8080';
+import { useAuth } from './AuthContext';
+import { ws } from '../services/socket';
+import { BackgroundPreset, createVirtualBackgroundStream } from '../services/virtualBackground';
 
 // Tạo một Context chung để chia sẻ socket và state cho toàn bộ ứng dụng
 export const RoomContext = createContext<null | any>(null);
 
-// Khởi tạo kết nối Socket.IO Client tới WebSocket Server (Cổng 8080)
-const ws = socketIOClient(WS);
-
 interface RoomProviderProps {
     children: React.ReactNode;
 }
+
+export interface MediaPreferences {
+    cameraDeviceId: string;
+    microphoneDeviceId: string;
+    background: BackgroundPreset;
+}
+
+interface AvailableMediaDevices {
+    cameras: MediaDeviceInfo[];
+    microphones: MediaDeviceInfo[];
+}
+
+const mediaPreferencesKey = "realtime-video-call:media-preferences";
+const readMediaPreferences = (): MediaPreferences => {
+    try {
+        const stored = localStorage.getItem(mediaPreferencesKey);
+        if (stored) return { cameraDeviceId: "", microphoneDeviceId: "", background: "none", ...JSON.parse(stored) };
+    } catch {
+        localStorage.removeItem(mediaPreferencesKey);
+    }
+    return { cameraDeviceId: "", microphoneDeviceId: "", background: "none" };
+};
+
+const getMediaConstraints = (preferences: MediaPreferences): MediaStreamConstraints => ({
+    video: preferences.cameraDeviceId ? { deviceId: { exact: preferences.cameraDeviceId } } : true,
+    audio: preferences.microphoneDeviceId ? { deviceId: { exact: preferences.microphoneDeviceId } } : true,
+});
+
+const createOutboundMedia = async (rawStream: MediaStream, background: BackgroundPreset) => {
+    if (background === "none") return { stream: rawStream, dispose: undefined };
+    const processed = await createVirtualBackgroundStream(rawStream, background);
+    return { stream: processed.stream, dispose: processed.dispose };
+};
 
 // Hàm tạo MediaStream giả từ Canvas để test khi không có camera thực tế
 const createFakeStream = (): MediaStream => {
@@ -64,6 +94,7 @@ const createFakeStream = (): MediaStream => {
 
 export const RoomProvider: React.FC<RoomProviderProps> = ({ children }) => {
     const navigate = useNavigate(); // Lấy hàm điều hướng từ React Router
+    const { user } = useAuth();
 
     const [me, setMe] = useState<Peer>(); // Lưu đối tượng PeerJS của chính mình
     const [stream, setStream] = useState<MediaStream>(); // Lưu luồng Media (Camera & Micro hoặc Màn hình) của chính mình
@@ -71,6 +102,8 @@ export const RoomProvider: React.FC<RoomProviderProps> = ({ children }) => {
     const [screenStreams, setScreenStreams] = useState<Record<string, MediaStream>>({});
     const [peerReady, setPeerReady] = useState(false);
     const [isMicMuted, setIsMicMuted] = useState(false);
+    const [mediaPreferences, setMediaPreferences] = useState<MediaPreferences>(readMediaPreferences);
+    const [availableMediaDevices, setAvailableMediaDevices] = useState<AvailableMediaDevices>({ cameras: [], microphones: [] });
     const [peers, dispatch] = useReducer(peersReducer, {}); // Quản lý danh sách các peer (người dùng khác) trong phòng
     const [screenSharingId, setScreenSharingId] = useState<string>(""); // Lưu ID của người đang chia sẻ màn hình
     const [roomId, setRoomId] = useState<string>(); // Lưu mã phòng hiện tại
@@ -79,7 +112,10 @@ export const RoomProvider: React.FC<RoomProviderProps> = ({ children }) => {
         isChatOpen: false
     })
     const meRef = useRef<Peer | undefined>(undefined);
+    const mediaPreferencesRef = useRef(mediaPreferences);
     const streamRef = useRef<MediaStream | undefined>(undefined);
+    const rawStreamRef = useRef<MediaStream | undefined>(undefined);
+    const backgroundDisposerRef = useRef<(() => void) | undefined>(undefined);
     const localScreenRef = useRef<MediaStream | undefined>(undefined);
     const roomIdRef = useRef<string | undefined>(undefined);
     const participantIds = useRef(new Set<string>());
@@ -207,11 +243,79 @@ export const RoomProvider: React.FC<RoomProviderProps> = ({ children }) => {
         });
     }, []);
 
+    const refreshMediaDevices = useCallback(async () => {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        setAvailableMediaDevices({
+            cameras: devices.filter((device) => device.kind === "videoinput"),
+            microphones: devices.filter((device) => device.kind === "audioinput"),
+        });
+    }, []);
+
+    const applyMediaPreferences = useCallback(async (nextPreferences: MediaPreferences) => {
+        const nextRawStream = await navigator.mediaDevices.getUserMedia(getMediaConstraints(nextPreferences));
+        let nextOutboundStream = nextRawStream;
+        let nextDispose: (() => void) | undefined;
+
+        try {
+            const processed = await createOutboundMedia(nextRawStream, nextPreferences.background);
+            nextOutboundStream = processed.stream;
+            nextDispose = processed.dispose;
+        } catch (error) {
+            nextRawStream.getTracks().forEach((track) => track.stop());
+            throw error;
+        }
+        nextOutboundStream.getAudioTracks().forEach((track) => {
+            track.enabled = !isMicMuted;
+        });
+
+        const previousRawStream = rawStreamRef.current;
+        const previousOutboundStream = streamRef.current;
+        const previousDispose = backgroundDisposerRef.current;
+        const localPeer = meRef.current;
+        const senders = localPeer
+            ? Object.values(localPeer.connections).flatMap((connectionGroup: any) =>
+                (Array.isArray(connectionGroup) ? connectionGroup : [connectionGroup])
+                    .flatMap((connection: any) => connection.peerConnection?.getSenders() || []))
+            : [];
+
+        const replacements = (["video", "audio"] as const).map(async (kind) => {
+            const nextTrack = nextOutboundStream.getTracks().find((track) => track.kind === kind);
+            if (!nextTrack) return;
+            await Promise.all(senders.filter((sender: RTCRtpSender) => sender.track?.kind === kind)
+                .map((sender: RTCRtpSender) => sender.replaceTrack(nextTrack)));
+        });
+
+        try {
+            await Promise.all(replacements);
+        } catch (error) {
+            nextDispose?.();
+            nextRawStream.getTracks().forEach((track) => track.stop());
+            throw error;
+        }
+
+        backgroundDisposerRef.current = nextDispose;
+        rawStreamRef.current = nextRawStream;
+        streamRef.current = nextOutboundStream;
+        setStream(nextOutboundStream);
+        setMediaPreferences(nextPreferences);
+        mediaPreferencesRef.current = nextPreferences;
+        localStorage.setItem(mediaPreferencesKey, JSON.stringify(nextPreferences));
+
+        previousDispose?.();
+        if (previousRawStream && previousRawStream !== nextRawStream) {
+            previousRawStream.getTracks().forEach((track) => track.stop());
+        } else if (previousOutboundStream && previousOutboundStream !== previousRawStream) {
+            previousOutboundStream.getTracks().forEach((track) => track.stop());
+        }
+        await refreshMediaDevices();
+    }, [isMicMuted, refreshMediaDevices]);
+
     const sendMessage = (message: string) => {
         const messageData: IMessage = {
             content: message,
             timestamps: new Date().getTime(),
             author: me?.id,
+            authorName: user?.displayName,
         };
 
         chatDispatch(addMessageAction(messageData));
@@ -233,7 +337,13 @@ export const RoomProvider: React.FC<RoomProviderProps> = ({ children }) => {
 
     // 6. Hook chạy một lần duy nhất khi khởi tạo ứng dụng (Mount) để cài đặt PeerJS và Socket Listeners
     useEffect(() => {
+        if (!user) {
+            ws.disconnect();
+            return;
+        }
+
         let active = true;
+        ws.connect();
         const meId = uuidv4(); // Tạo định danh ngẫu nhiên cho PeerJS cá nhân
         const peer = new Peer(meId, {
             host: 'localhost',
@@ -290,22 +400,41 @@ export const RoomProvider: React.FC<RoomProviderProps> = ({ children }) => {
 
         // Xin quyền truy cập Camera/Micro; nếu không có sẽ tự động fallback sang ảnh/canvas giả lập
         navigator.mediaDevices
-            .getUserMedia({ video: true, audio: true })
-            .then((userStream) => {
+            .getUserMedia(getMediaConstraints(mediaPreferencesRef.current))
+            .then(async (userStream) => {
                 if (!active) {
                     userStream.getTracks().forEach((track) => track.stop());
                     return;
                 }
-                streamRef.current = userStream;
-                setStream(userStream);
+                rawStreamRef.current = userStream;
+                try {
+                    const outbound = await createOutboundMedia(userStream, mediaPreferencesRef.current.background);
+                    if (!active) {
+                        outbound.dispose?.();
+                        userStream.getTracks().forEach((track) => track.stop());
+                        return;
+                    }
+                    backgroundDisposerRef.current = outbound.dispose;
+                    streamRef.current = outbound.stream;
+                    setStream(outbound.stream);
+                } catch (error) {
+                    console.error("Could not initialize selected background; using camera without effects:", error);
+                    streamRef.current = userStream;
+                    setStream(userStream);
+                    setMediaPreferences((current) => ({ ...current, background: "none" }));
+                }
+                void refreshMediaDevices();
             })
             .catch((error) => {
                 if (!active) return;
                 console.warn("Không tìm thấy thiết bị thật, đang dùng luồng Canvas giả lập:", error);
                 const fakeStream = createFakeStream();
+                rawStreamRef.current = fakeStream;
                 streamRef.current = fakeStream;
                 setStream(fakeStream);
             });
+
+            navigator.mediaDevices.addEventListener("devicechange", refreshMediaDevices);
 
         // Lắng nghe các sự kiện điều hướng và quản lý phòng từ Socket.IO Server
         ws.on("room-created", enterRoom);
@@ -338,7 +467,12 @@ export const RoomProvider: React.FC<RoomProviderProps> = ({ children }) => {
             }
             peer.destroy();
             localScreenRef.current?.getTracks().forEach((track) => track.stop());
-            streamRef.current?.getTracks().forEach((track) => track.stop());
+            backgroundDisposerRef.current?.();
+            rawStreamRef.current?.getTracks().forEach((track) => track.stop());
+            if (streamRef.current !== rawStreamRef.current) {
+                streamRef.current?.getTracks().forEach((track) => track.stop());
+            }
+            navigator.mediaDevices.removeEventListener("devicechange", refreshMediaDevices);
             ws.off("room-created");
             ws.off("get-users");
             ws.off("user-disconnected");
@@ -348,7 +482,7 @@ export const RoomProvider: React.FC<RoomProviderProps> = ({ children }) => {
             ws.off("add-message");
             ws.off("get-message");
         }
-    }, [addHistory, addMessage, connectScreenToPeer, connectToPeer, enterRoom, getUsers, removePeer]);
+    }, [addHistory, addMessage, connectScreenToPeer, connectToPeer, enterRoom, getUsers, refreshMediaDevices, removePeer, user]);
 
     console.log({ peers });
 
@@ -356,7 +490,8 @@ export const RoomProvider: React.FC<RoomProviderProps> = ({ children }) => {
         <RoomContext.Provider value={{
             ws, me, stream, screenStream, screenStreams, peerReady, peers, shareScreen,
             stopScreenSharing, screenSharingId, setRoomId: updateRoomId, isMicMuted,
-            toggleMicrophone, sendMessage, chat, toggleChat
+            toggleMicrophone, sendMessage, chat, toggleChat, mediaPreferences,
+            availableMediaDevices, refreshMediaDevices, applyMediaPreferences
         }}>
             {children}
         </RoomContext.Provider>

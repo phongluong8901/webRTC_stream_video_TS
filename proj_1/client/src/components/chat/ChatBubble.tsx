@@ -7,7 +7,7 @@ import classNames from "classnames";
 export const ChatBubble: React.FC<{ message: IMessage }> = ({ message }) => {
     const { me } = useContext(RoomContext);
     const isSelf = message.author === me?.id;
-    const sender = isSelf ? "Bạn" : `Thành viên ${message.author?.slice(0, 6) || "khách"}`;
+    const sender = isSelf ? "Bạn" : message.authorName || `Thành viên ${message.author?.slice(0, 6) || "khách"}`;
     const sentAt = new Intl.DateTimeFormat("vi-VN", {
         hour: "2-digit",
         minute: "2-digit",

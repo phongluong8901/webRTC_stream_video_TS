@@ -4,6 +4,7 @@ interface MeetingHeaderProps {
     duration: string;
     linkCopied: boolean;
     onCopyLink: () => void;
+    onProfileClick: () => void;
 }
 
 export const MeetingHeader: React.FC<MeetingHeaderProps> = ({
@@ -12,6 +13,7 @@ export const MeetingHeader: React.FC<MeetingHeaderProps> = ({
     duration,
     linkCopied,
     onCopyLink,
+    onProfileClick,
 }) => (
     <header className="z-10 flex flex-none flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-[#172124] px-4 py-3 sm:px-6">
         <div className="flex min-w-0 items-center gap-3">
@@ -41,6 +43,18 @@ export const MeetingHeader: React.FC<MeetingHeaderProps> = ({
                 </svg>
                 {duration}
             </div>
+            <button
+                type="button"
+                onClick={onProfileClick}
+                title="Hồ sơ và cài đặt thiết bị"
+                aria-label="Hồ sơ và cài đặt"
+                className="grid h-10 w-10 place-items-center rounded-lg border border-white/10 text-white/75 transition hover:bg-white/10 hover:text-white"
+            >
+                <svg aria-hidden="true" className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                    <circle cx="12" cy="8" r="3.5" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 21v-1.5A5.5 5.5 0 0 1 10.5 14h3a5.5 5.5 0 0 1 5.5 5.5V21" />
+                </svg>
+            </button>
             <button
                 type="button"
                 onClick={onCopyLink}

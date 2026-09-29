@@ -1,5 +1,5 @@
 import { useContext, useEffect, useState } from "react";
-import { useParams } from "react-router-dom"
+import { useNavigate, useParams } from "react-router-dom"
 import { RoomContext } from "../context/RoomContext";
 import { ShareScreenButton } from "../components/ShareScreenButton";
 import { ChatButton } from "../components/ChatButton";
@@ -8,10 +8,13 @@ import { MeetingHeader } from "../components/meeting/MeetingHeader";
 import { ParticipantGallery } from "../components/meeting/ParticipantGallery";
 import { ScreenShareStage } from "../components/meeting/ScreenShareStage";
 import { MicrophoneButton } from "../components/meeting/MicrophoneButton";
+import { useAuth } from "../context/AuthContext";
 
 export const Room = () => {
     // 1. Lấy ID phòng từ URL (ví dụ: đường dẫn /room/123 -> id = "123")
     const { id } = useParams();
+    const navigate = useNavigate();
+    const { user, loading } = useAuth();
 
     // 2. Lấy các biến kết nối và state toàn cục từ RoomContext
     const {
@@ -35,6 +38,10 @@ export const Room = () => {
         elapsedSeconds % 60,
     ].map((part) => String(part).padStart(2, "0")).join(":");
 
+    useEffect(() => {
+        if (!loading && !user) navigate("/", { replace: true });
+    }, [loading, navigate, user]);
+
     const copyRoomLink = async () => {
         try {
             await navigator.clipboard.writeText(window.location.href);
@@ -47,13 +54,15 @@ export const Room = () => {
 
     // 3. Tự động phát sự kiện "join-room" lên server khi component khởi tạo và đã có thông tin `me`
     useEffect(() => {
-        if (me && stream && peerReady) ws.emit("join-room", { roomId: id, peerId: me.id })
-    }, [id, me, stream, peerReady, ws]);
+        if (user && me && stream && peerReady) ws.emit("join-room", { roomId: id, peerId: me.id })
+    }, [id, me, stream, peerReady, user, ws]);
 
     // 4. Cập nhật mã phòng vào Context mỗi khi id thay đổi
     useEffect(() => {
         setRoomId(id);
     }, [id, setRoomId]);
+
+    if (loading || !user) return <main className="grid min-h-screen place-items-center bg-[#101719] text-white">Đang kiểm tra đăng nhập...</main>;
 
     return (
         <div className="flex h-[100dvh] flex-col overflow-hidden bg-[#101719] text-white">
@@ -63,6 +72,7 @@ export const Room = () => {
                 duration={duration}
                 linkCopied={linkCopied}
                 onCopyLink={copyRoomLink}
+                onProfileClick={() => navigate("/profile")}
             />
 
             <main className="relative flex min-h-0 flex-1 gap-3 overflow-hidden p-3 pb-24 sm:gap-4 sm:p-5 sm:pb-24">
