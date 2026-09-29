@@ -31,3 +31,9 @@ git checkout -b p5_advanced_map
 git add .
 git commit -m "change: first"
 git push origin p5_advanced_map
+
+---
+git checkout -b p7_map_advanced
+git add .
+git commit -m "change: first"
+git push origin p7_map_advanced
