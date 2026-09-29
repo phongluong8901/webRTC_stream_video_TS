@@ -75,84 +75,9 @@ proj_1/
 └── peerjs/   # PeerJS signaling server
 ```
 
-## Yêu cầu
 
-- Node.js và npm.
-- Trình duyệt hỗ trợ WebRTC, `getUserMedia` và `getDisplayMedia`.
-- Camera/microphone nếu muốn gửi media thật. Trên localhost, trình duyệt cho phép dùng các Media API; khi deploy cần HTTPS.
+<img width="1902" height="913" alt="image" src="https://github.com/user-attachments/assets/293a335e-4ed7-4ed2-b9a3-62a0f8ac1f1a" />
 
-## Cài đặt và chạy local
+<img width="1892" height="920" alt="image" src="https://github.com/user-attachments/assets/3b9ee308-c22b-4a59-9647-ae237d44e0a7" />
 
-Cài dependencies riêng trong cả ba package:
 
-```bash
-cd proj_1/client
-npm install
-
-cd ../server
-npm install
-
-cd ../peerjs
-npm install
-```
-
-Mở ba terminal riêng và chạy từng service:
-
-**1. Socket.IO server, cổng 8080**
-
-```bash
-cd proj_1/server
-npm run dev
-```
-
-**2. PeerJS server, cổng 9000**
-
-```bash
-cd proj_1/peerjs
-npm run dev
-```
-
-**3. React client, cổng 3000**
-
-```bash
-cd proj_1/client
-npm start
-```
-
-Mở `http://localhost:3000`. Tạo phòng ở tab đầu, sao chép room ID rồi dùng ID đó ở các tab tiếp theo.
-
-> Các URL `localhost` của client và server đang được khai báo trực tiếp trong mã nguồn. Khi chạy trên máy khác hoặc deploy, cần cấu hình lại địa chỉ client, Socket.IO server, PeerServer và CORS cho đúng môi trường.
-
-## Build và kiểm tra
-
-```bash
-cd proj_1/client
-npm run build
-```
-
-```bash
-cd proj_1/server
-npm run build
-```
-
-Client dùng Create React App; test runner có thể chạy bằng:
-
-```bash
-cd proj_1/client
-npm test
-```
-
-## Giới hạn và hướng phát triển
-
-- Danh sách room, trạng thái share và chat chỉ nằm trong RAM của một process server; server restart sẽ xóa dữ liệu.
-- Chưa có tài khoản, quyền truy cập, tên hiển thị do người dùng chọn, hoặc moderation.
-- Media hiện dùng mesh P2P: mỗi trình duyệt kết nối trực tiếp với các peer khác. Khi số người tăng, băng thông và tải thiết bị tăng theo số kết nối; đây chưa phải kiến trúc SFU phù hợp cho phòng quy mô lớn.
-- Chưa cấu hình STUN/TURN riêng cho production. Một số mạng doanh nghiệp, NAT hoặc firewall có thể chặn kết nối WebRTC.
-- Các dịch vụ hiện được cấu hình cho local development; trước khi public cần HTTPS, biến môi trường, CORS/authorization phù hợp, giới hạn và xác thực room ID, cùng cơ chế lưu trữ phù hợp.
-- Có thể phát triển tiếp: SFU (ví dụ mediasoup/LiveKit), TURN, lưu chat bền vững, tên/avatar tùy chỉnh, danh sách người tham gia, ghi nhận lỗi kết nối và test end-to-end.
-
-## Đóng góp
-
-1. Tạo branch cho thay đổi.
-2. Giữ thay đổi tập trung và cập nhật README khi hành vi hoặc cách chạy thay đổi.
-3. Chạy build client/server trước khi mở pull request.
