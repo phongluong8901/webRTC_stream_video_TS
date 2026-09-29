@@ -3,6 +3,7 @@ import { useEffect, useRef } from "react";
 // Định nghĩa kiểu dữ liệu cho props đầu vào của component
 interface VideoPlayerProps {
     stream: MediaStream | undefined; // Luồng media (camera/mic) truyền vào, có thể là undefined nếu chưa tải xong
+    muted?: boolean;
 }
 
 export const VideoPlayer: React.FC<VideoPlayerProps> = ({ stream }) => {
@@ -22,6 +23,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ stream }) => {
         // - ref={videoRef}: liên kết thẻ này với useRef ở trên
         // - autoPlay: tự động phát video ngay khi có stream
         // - muted={true}: tắt tiếng (khử tiếng vang/feedback) đối với video của chính mình
-        <video ref={videoRef} autoPlay muted={true} />
+        <video ref={videoRef} autoPlay muted={true} playsInline className="block h-full w-full object-cover" />
     );
 }
