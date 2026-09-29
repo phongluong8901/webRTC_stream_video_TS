@@ -10,10 +10,10 @@ import { addPeerAction, removePeerAction } from './peerActions';
 
 const WS = 'http://localhost:8080';
 
-// Tạo một Context chung để chia sẻ socket cho toàn bộ app
+// Tạo một Context chung để chia sẻ socket và state cho toàn bộ ứng dụng
 export const RoomContext = createContext<null | any>(null);
 
-// Khởi tạo kết nối Socket.IO với Server (Cổng 8080)
+// Khởi tạo kết nối Socket.IO Client tới WebSocket Server (Cổng 8080)
 const ws = socketIOClient(WS);
 
 interface RoomProviderProps {
@@ -21,36 +21,37 @@ interface RoomProviderProps {
 }
 
 export const RoomProvider: React.FC<RoomProviderProps> = ({ children }) => {
-    const navigate = useNavigate(); // Lấy hàm chuyển trang từ React Router
+    const navigate = useNavigate(); // Lấy hàm điều hướng từ React Router
 
-    const [me, setMe] = useState<Peer>();
+    const [me, setMe] = useState<Peer>(); // Lưu đối tượng PeerJS của chính mình
+    const [stream, setStream] = useState<MediaStream>(); // Lưu luồng Media (Camera & Micro) của chính mình
+    const [peers, dispatch] = useReducer(peersReducer, {}); // Quản lý danh sách các peer (người dùng khác) trong phòng bằng Reducer
 
-    const [stream, setStream] = useState<MediaStream>();
-
-    const [peers, dispatch] = useReducer(peersReducer, {});
-
-    // Khai báo hàm xử lý khi nhận được mã phòng
+    // Hàm xử lý khi server báo tạo phòng thành công -> chuyển hướng client sang trang phòng
     const enterRoom = ({ roomId }: { roomId: string }) => {
         console.log({ roomId });
-
-        navigate(`/room/${roomId}`); // Tự động chuyển hướng trình duyệt sang URL phòng họp
+        navigate(`/room/${roomId}`);
     };
 
+    // Hàm nhận danh sách người dùng hiện có trong phòng từ server
     const getUsers = ({ participants }: { participants: string[] }) => {
         console.log(participants);
     };
 
+    // Hàm xóa peer khỏi danh sách khi họ rời phòng
     const removePeer = (peerId: string) => {
         dispatch(removePeerAction(peerId));
     }
 
-    // Hook chạy một lần khi component hiển thị lần đầu
+    // 1. Hook chạy một lần duy nhất khi khởi tạo ứng dụng (Mount)
     useEffect(() => {
-        const meId = uuidv4();
+        const meId = uuidv4(); // Tạo định danh ngẫu nhiên cho PeerJS cá nhân
 
+        // Khởi tạo PeerJS client với ID vừa tạo
         const peer = new Peer(meId);
         setMe(peer);
 
+        // Xin quyền truy cập Camera và Micro từ trình duyệt của người dùng
         try {
             navigator.mediaDevices
                 .getUserMedia({ video: true, audio: true })
@@ -59,31 +60,38 @@ export const RoomProvider: React.FC<RoomProviderProps> = ({ children }) => {
                 })
         } catch (error) {
             console.log(error);
-
         }
 
-        ws.on("room-created", enterRoom) // Lắng nghe sự kiện "room-created" từ server gửi về
-        ws.on("get-users", getUsers);
-        ws.on("user-disconnected", removePeer)
+        // Lắng nghe các sự kiện từ Socket.IO Server
+        ws.on("room-created", enterRoom);        // Khi tạo phòng thành công -> chuyển trang
+        ws.on("get-users", getUsers);            // Nhận danh sách thành viên
+        ws.on("user-disconnected", removePeer);  // Khi có người ngắt kết nối -> xóa khỏi UI
     }, [])
 
+    // 2. Hook xử lý việc gọi điện P2P qua PeerJS (Chạy khi đã có thông tin `me` và `stream` của mình)
     useEffect(() => {
         if (!me) return;
         if (!stream) return;
 
+        // Tình huống A: Khi có người dùng mới tham gia vào phòng (Server phát sự kiện "user-joined")
         ws.on("user-joined", ({ peerId }) => {
+            // Gọi điện đến peer mới vừa vào, đồng thời gửi kèm stream của mình
             const call = me.call(peerId, stream);
 
+            // Lắng nghe sự kiện khi peer kia trả lời và gửi ngược lại stream của họ cho mình
             call.on("stream", (peerStream) => {
-                dispatch(addPeerAction(peerId, peerStream))
+                dispatch(addPeerAction(peerId, peerStream));
             });
         });
 
+        // Tình huống B: Khi có người khác gọi đến mình (Mình nhận được cuộc gọi từ PeerJS)
         me.on('call', (call) => {
+            // Trả lời cuộc gọi và gửi kèm stream của chính mình cho họ
             call.answer(stream);
 
+            // Lắng nghe luồng stream của người gọi gửi tới để hiển thị lên màn hình
             call.on("stream", (peerStream) => {
-                dispatch(addPeerAction(call.peer, peerStream))
+                dispatch(addPeerAction(call.peer, peerStream));
             });
         });
     }, [me, stream]);
@@ -91,6 +99,7 @@ export const RoomProvider: React.FC<RoomProviderProps> = ({ children }) => {
     console.log({ peers });
 
     return (
+        // Cung cấp các biến trạng thái và kết nối xuống toàn bộ các component con bên trong
         <RoomContext.Provider value={{ ws, me, stream, peers }}>
             {children}
         </RoomContext.Provider>
