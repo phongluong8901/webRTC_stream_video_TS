@@ -1,0 +1,80 @@
+{
+  "name": "learn_realtime_videocalling",
+  "version": "1.0.0",
+  "description": "Ứng dụng họp video trực tuyến nhiều người dùng",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "start:dev": "electron . --dev",
+    "start:standalone": "electron . --standalone",
+    "build:client": "npm --prefix proj_1/client run build",
+    "build:server": "npm --prefix proj_1/server run build",
+    "build:peerjs": "npm --prefix proj_1/peerjs run build",
+    "build:app": "npm run build:client && npm run build:server && npm run build:peerjs",
+    "stage:electron-env": "node scripts/stage-electron-env.js",
+    "build:win": "npm run build:app && npm run stage:electron-env && node scripts/build-win.js"
+  },
+  "devDependencies": {
+    "electron": "^41.7.1",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.videocalling.app",
+    "productName": "VideoCallingApp",
+    "directories": {
+      "output": "dist_electron"
+    },
+    "files": [
+      "main.js",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "proj_1/client/build",
+        "to": "client-build"
+      },
+      {
+        "from": "proj_1/server/dist",
+        "to": "server/dist"
+      },
+      {
+        "from": "proj_1/server/node_modules",
+        "to": "server/node_modules"
+      },
+      {
+        "from": "proj_1/server/package.json",
+        "to": "server/package.json"
+      },
+      {
+        "from": "electron-extra/server",
+        "to": "server"
+      },
+      {
+        "from": "proj_1/peerjs/dist",
+        "to": "peerjs/dist"
+      },
+      {
+        "from": "proj_1/peerjs/node_modules",
+        "to": "peerjs/node_modules"
+      },
+      {
+        "from": "proj_1/peerjs/package.json",
+        "to": "peerjs/package.json"
+      }
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/phongluong8901/webRTC_stream_video_TS.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs"
+}

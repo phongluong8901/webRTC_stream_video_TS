@@ -1,0 +1,11 @@
+node_modules/
+dist/
+logs/
+
+dist_electron/
+dist_electron_out/
+release/
+*.tmp
+
+*.logs
+.env
